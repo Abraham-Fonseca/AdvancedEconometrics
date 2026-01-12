@@ -1,0 +1,3 @@
+# Prefacio {.unnumbered}
+
+Las presentes notas de estudio corresponden a la materia de Modelos Avanzados de Econometría Aplicados a las Ciencias Administrativas del Doctorado en Administración de la Universidad Michoacana de San Nicolás de Hidalgo.

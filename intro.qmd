@@ -1,0 +1,3 @@
+# Introducción
+
+El entendimiento y correcta aplicación de los modelos econométricos es esencial para una interpretación adecuada de las relaciones entre las variables de estudio, y por lo tanto, para sustentar las conclusiones a las que llegue un investigador. El presente documento se desarrolla con base en el libro "Principles of Econometrics" de R. Carter Hill.

@@ -1,0 +1,691 @@
+# Capítulo 9. Regresión con Datos de Series de Tiempo: Variables Estacionarias
+
+## Series de Tiempo y Estacionaridad
+
+Una serie de tiempo se entiende como un conjunto de observaciones ordenadas cronológicamente correspondientes a una variable medida en periodos de tiempo determinados.
+
+Al estudiar y proponer un modelo robusto de series de tiempo el investigador se enfrenta a dos retos fundamentales. Primero, a cuantificar, probar y modelar la correlación que se presenta entre las diferentes observaciones; y segundo, a estimar la importancia del orden derivado de las relaciones dinámicas entre las variables de estudio.
+
+Para estudiar las relaciones dinámicas que se presentan entre las variables se puede hacer mediante tres diferentes perspectivas.
+
+1.  La relación entre una variable dependiente y una variable independiente no sólo puede estar explicada por los valores actuales de las mismas, sino que el valor de la variable explicada puede estar en función de valores anteriores en el tiempo de la variable explicativa. Lo anterior se deriva porque los efectos de una variable en otra son rezagados, es decir, se ven hasta varios periodos futuros, a esto se le conoce como un modelo de rezago distribuido. Un ejemplo de función de este tipo es:
+
+$$y_t = f(x_{t} + x_{t-1} + x_{t-2}, ...)$$ {#eq-1}
+
+2.  Otra manera de abordar el análisis de la relación dinámica es a través del desarrollo de un modelo de variable independiente rezagada, en otras palabras, en el modelo econométrico se agrega como una variable explicativa el valor de la variable dependiente del perido $t-1$. Como ejemplo de la ecuación se tiene:
+
+$$y_t = f(y_{t-1}, x_{t},...)$$ {#eq-2}
+
+Asimismo, se pueden combinar las dos perspectivas anteriores generando lo que se conoce como un modelo autoregresivo con rezagos distribuidos, el cual se expresa de la siguiente manera:
+
+$$y_t = f(y_{t-1}, x_{t}, x_{t-1}, x_{t-2},...)$$ {#eq-3}
+
+3.  Finalmente, la tercera perspectiva para analizar las relaciones dinámicas entre las variables de estudio es a través de un modelo basado en los términos de los errores. Esto se entiende como que el valor del término del error actual depende de los valores de los términos de errores de periodos anteriores; y en consecuencia, también el valor del término del error actual afecta los valores de los términos de los errores futuros; por ello se conoce este tipo de modelo como de errores serialmente correlacionados o de errores autocorrelacionados. Los cuales se comprenden por medio de las siguientes funciones:
+
+$$y_t = f(x_{t}) + e_{t}$$ {#eq-4} $$e_t = g(e_{t-1})$$ {#eq-5}
+
+Por otra parte, es fundamental establecer que la variable correlacionada con un valor pasado se denomina como una serie de tiempo autocorrelacionada o serialmente correlacionada. Ya sea con su valor anterior, $y_{t-1}$, o con el valor de su término de error actual $e_{t}$ o anterior $e_{t-1}$.
+
+De igual manera, un concepto importante a considerar es el de la estacionariedad de una serie de tiempo. Una serie de tiempo se considera estacionaria si sus propiedades estadísticas, como la media y la varianza, son constantes a lo largo del tiempo. En otras palabras, una serie estacionaria no muestra tendencias ni patrones estacionales y sus valores fluctúan alrededor de una media constante. La estacionariedad es crucial en el análisis de series de tiempo porque muchos métodos estadísticos y econométricos asumen que las series de tiempo son estacionarias. Si una serie no es estacionaria, los resultados de los análisis pueden ser engañosos o incorrectos.
+
+## Requisito de Estacionaridad
+
+Antes de correr cualquier regresión, debemos asegurarnos de que una serie de tiempo $Y_t$ es estacionaria si cumple tres condiciones invariantes en el tiempo:
+
+-   Media Constante: $E(Y_t) = \mu$ (no tiene tendencia volatil hacia arriba o abajo).
+
+-   Varianza Constante: $var(Y_t) = \sigma^2$ (la volatilidad no es inestable con el tiempo).
+
+-   Covarianza estable: La relación entre $Y_t$ y $Y_{t-k}$ depende solo de la distancia $k$, no del momento $t$.
+
+Los precios de las acciones ($P_t$) suelen ser NO estacionarios. Si hacemos una regresión con precios, obtendremos una Regresión Espuria (R-cuadrada alta mostrando una correlación estadística falsa). La solución es transformar los precios a Retornos Continuos (Diferencias Logarítmicas).
+
+$$r_t = \ln(P_t) - \ln(P_{t-1}) \approx \% \Delta P_t$$ {#eq-6}
+
+En este apartado se utiliza la serie de tiempo del IPC de México como variable dependiente ($Y$) y las series de tiempo de las acciones de México de CEMEX y WALMEX como variables independientes ($X$).
+
+Para iniciar vamos a modelar de forma lineal simple como los movimientos de CEMEX y WALMEX explican el comportamiento del IPC, mediante la ecuación:
+
+$$IPC_t = \alpha + \beta_1 CEMEX_t + \beta_2 WALMEX_t + e_t$$ {#eq-7}
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# 1. CONFIGURACIÓN Y PAQUETES
+packages <- c("quantmod", "tidyverse", "dynlm", "lmtest", "sandwich", "zoo", "plotly", "broom", "car", "urca","knitr","dplyr","purrr")
+
+for (pkg in packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
+  library(pkg, character.only = TRUE)
+}
+
+# 2. DESCARGA DE DATOS
+start_date <- "2023-01-01"
+end_date <- Sys.Date()
+
+# Descargar (Nota: ^MXX es el IPC)
+getSymbols(c("^MXX", "CEMEXCPO.MX", "WALMEX.MX"), 
+           src = "yahoo", from = start_date, to = end_date)
+
+# 3. PROCESAMIENTO
+# Retornos logarítmicos
+ipc_returns <- dailyReturn(Cl(MXX), type = "log")
+cemex_returns <- dailyReturn(Cl(CEMEXCPO.MX), type = "log")
+walmex_returns <- dailyReturn(Cl(WALMEX.MX), type = "log")
+
+# Merge y limpieza
+retornos <- na.omit(merge(ipc_returns, cemex_returns, walmex_returns))
+colnames(retornos) <- c("IPC", "CEMEX", "WALMEX")
+
+# Convertir a zoo para dynlm
+data_ts <- as.zoo(retornos)
+
+# 4. VISUALIZACIÓN INTERACTIVA (PLOTLY)
+# Graficamos las 3 series juntas para comparar volatilidad
+plot_combined <- plot_ly(x = index(retornos)) %>%
+  add_trace(y = coredata(retornos$IPC), name = 'IPC', type = 'scatter', mode = 'lines', line = list(color = 'blue')) %>%
+  add_trace(y = coredata(retornos$CEMEX), name = 'CEMEX', type = 'scatter', mode = 'lines', line = list(color = 'red')) %>%
+  add_trace(y = coredata(retornos$WALMEX), name = 'WALMEX', type = 'scatter', mode = 'lines', line = list(color = 'green')) %>%
+  layout(title = "Comparación de Retornos Logarítmicos",
+         xaxis = list(title = "Fecha"),
+         yaxis = list(title = "Log Retornos"))
+
+plot_combined
+
+# 5. MODELO DE REGRESIÓN
+model <- dynlm(IPC ~ CEMEX + WALMEX, data = data_ts)
+
+# Tabla de resultados OLS estándar
+tidy(model) %>%
+  mutate(across(where(is.numeric), ~ round(., 4))) %>%
+  knitr::kable(caption = "Modelo OLS Estándar (Sin corregir)")
+
+# 6. DIAGNÓSTICO (BREUSCH-GODFREY)
+# Detectamos si hay problemas de autocorrelación
+bg_test <- bgtest(model, order = 5)
+
+# Mostrar resultado
+data.frame(
+  "Estadístico LM" = round(bg_test$statistic, 4),
+  "Valor p" = round(bg_test$p.value, 4),
+  "Conclusión" = ifelse(bg_test$p.value < 0.05, "Hay Autocorrelación", "No hay Autocorrelación")
+) %>%
+  knitr::kable(caption = "Prueba de Breusch-Godfrey (Diagnóstico)")
+
+# 7. SOLUCIÓN: ERRORES ESTÁNDAR ROBUSTOS (HAC)
+# Si BG Test sale significativo (p < 0.05), usamos Newey-West
+
+# Calculamos la matriz de covarianza robusta
+vcov_hac <- vcovHAC(model)
+
+# Aplicamos la corrección a los coeficientes
+model_robust <- coeftest(model, vcov = vcov_hac)
+
+# Convertimos a tidy dataframe manualmente para kable
+results_robust <- data.frame(
+  Variable = rownames(model_robust),
+  Estimacion = round(model_robust[,1], 4),
+  Error_Std_Robusto = round(model_robust[,2], 4),
+  t_value = round(model_robust[,3], 4),
+  p_value = round(model_robust[,4], 4)
+)
+results_robust %>%
+  knitr::kable(caption = "Resultados Finales con Errores Robustos (Newey-West)")
+
+# Mostrar resultados de R cuadrada
+r_squared <- summary(model)$r.squared
+data.frame(
+  "R-cuadrada" = round(r_squared, 4)
+) %>%
+  knitr::kable(caption = "R-cuadrada del Modelo con Errores Robustos")
+
+```
+
+Con la regresión realizada mediante Mínimos Cuadrados Ordinarios nos arroja la prueba Breusch-Godfrey que hay significancia estadística de autorrelación, por lo cual se aplicó el modelo de regresión con errores robustos Newey-West. Por lo tanto, los resultados muestra que $\alpha$ es cero, CEMEX tiene una $\beta_1$ de .2080 y WALMEX una $\beta_2$ de .2648, ambas significativos. Con una $R^2$ de 0.4997.
+
+## Pruebas de Estacionaridad
+
+Para corroborar que las series de tiempo son estacionarias, se aplican tres pruebas estadísticas: la Prueba de Dickey-Fuller (FD) Simple, Dickey-Fuller Aumentada (ADF) y la Prueba de Phillips-Perron.
+
+Primero explicaremos brevemente la Prueba Dickey-Fuller (DF). Utiliza un modelo simple para probar si $\rho$ (coeficiente de correlación) es igual 1. Si se cumple la hipótesis nula, la serie se considera no estacionaria. La hipótesis nula (H0) de la prueba establece que existe una raíz unitaria ($\rho$ = 1), mientras que la hipótesis alternativa (H1) indica que la serie es estacionaria ($\rho$ \< 1). Su principal debilidad es que asume que los errores no están autocorrelacionados.
+
+La ecuación que utiliza DF es:
+
+$$ \Delta Y_t = (\rho - 1)Y_{t-1} + \epsilon_t $$ {#eq-8}
+
+donde $\Delta Y_t$ es la diferencia de la serie en el tiempo t, $Y_{t-1}$ es el valor rezagado de la serie, y $\epsilon_t$ es el término de error. $\rho$ - 1 se sustituye por gamma ($\gamma$), por lo que la ecuación se reescribe como:
+
+$$ \Delta Y_t = \gamma Y_{t-1} + \epsilon_t $$ {#eq-9}
+
+De tal forma, que se busca comprobar si $\gamma$ es igual a cero (H0: $\gamma$ = 0) o menor que cero (H1: $\gamma$ \< 0). Si no se rechaza la hipótesis nula, se concluye que la serie tiene una raíz unitaria y, por lo tanto, es no estacionaria.
+
+Por otra parte, la Prueba Dickey-Fuller Aumentada (ADF) extiende la prueba DF al incluir términos de rezago adicionales para abordar la autocorrelación en los errores, es decir, asume que los errores están autorrelacionados. La hipótesis nula sigue siendo la misma ($\rho$ = 1), pero la inclusión de términos de rezago de la variable dependiente permite una mayor flexibilidad en el modelado de la serie temporal, como variables de control.
+
+La ecuación de la prueba ADF es:
+
+$$ \Delta Y_t = \gamma Y_{t-1} + \sum_{i=1}^{p} \alpha_i \Delta Y_{t-i} + \nu_t $$ {#eq-10}
+
+donde $p$ es el número de términos de rezago incluidos, y $\alpha_i$ son los coeficientes asociados a esos términos.
+
+El gran reto es esta segunda prueba es elegir el número adecuado de rezagos ($p$). Si se elige un valor demasiado bajo, puede no capturar toda la autocorrelación en los errores, mientras que un valor demasiado alto puede reducir la potencia de la prueba; por lo cual, es recomendable utilizar criterios de información como AIC (Akaike Information Criterion) y BIC (Bayesian Information Criterion).
+
+Finalmente, la Prueba Phillips-Perron (PP) es otra extensión de la prueba DF que también aborda la autocorrelación y la heterocedasticidad en los errores, pero lo hace mediante una corrección no paramétrica en lugar de incluir términos de rezago adicionales. La hipótesis nula sigue siendo la misma ($\rho$ = 1). La ecuación básica de la prueba PP es similar a la de la prueba DF:
+
+$$ \Delta Y_t = \gamma Y_{t-1} + \epsilon_t $$ {#eq-11}
+
+Utiliza la misma ecuación básica que la prueba DF, pero ajusta o corrige el estadístico de prueba, a efecto de realizar la comparación de valores críticos correctamente. La única debilidad de la prueba es que es efectiva y confiable con muestras grandes de datos, no es efectiva con muestras pequeñas.
+
+A continuación, se aplican las tres pruebas de raíz unitaria (DF, ADF y PP) a las series de tiempo de los precios de cierre de las acciones de CEMEX, WALTMART y del IPC de México:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# 1. Dickey-Fuller simple 
+df_ipc    <- ur.df(data_ts$IPC,    type = "none",  selectlags = "AIC")
+df_cemex  <- ur.df(data_ts$CEMEX,  type = "none",  selectlags = "AIC")
+df_walmex <- ur.df(data_ts$WALMEX, type = "none",  selectlags = "AIC")
+
+# 2. Dickey-Fuller Aumentada (con constante)
+adf_ipc    <- ur.df(data_ts$IPC,    type = "drift", selectlags = "AIC")
+adf_cemex  <- ur.df(data_ts$CEMEX,  type = "drift", selectlags = "AIC")
+adf_walmex <- ur.df(data_ts$WALMEX, type = "drift", selectlags = "AIC")
+
+# 3. Phillips-Perron (Z-tau con constante)
+pp_ipc    <- ur.pp(data_ts$IPC,    type = "Z-tau", model = "constant", lags = "short")
+pp_cemex  <- ur.pp(data_ts$CEMEX,  type = "Z-tau", model = "constant", lags = "short")
+pp_walmex <- ur.pp(data_ts$WALMEX, type = "Z-tau", model = "constant", lags = "short")
+
+# 4. Tabla de resultados
+resultados_estacionaridad <- data.frame(
+  Variable = c("IPC", "CEMEX", "WALMEX"),
+  
+  # Dickey-Fuller
+  DF_Stat = c(
+    round(df_ipc@teststat[1], 4),
+    round(df_cemex@teststat[1], 4),
+    round(df_walmex@teststat[1], 4)
+  ),
+  DF_Critical = c(
+    round(df_ipc@cval[1, "5pct"], 4),
+    round(df_cemex@cval[1, "5pct"], 4),
+    round(df_walmex@cval[1, "5pct"], 4)
+  ),
+  
+  # Augmented Dickey-Fuller
+  ADF_Stat = c(
+    round(adf_ipc@teststat[1], 4),
+    round(adf_cemex@teststat[1], 4),
+    round(adf_walmex@teststat[1], 4)
+  ),
+  ADF_Critical = c(
+    round(adf_ipc@cval[1, "5pct"], 4),
+    round(adf_cemex@cval[1, "5pct"], 4),
+    round(adf_walmex@cval[1, "5pct"], 4)
+  ),
+  
+  # Phillips-Perron
+  PP_Stat = c(
+    round(pp_ipc@teststat[1], 4),
+    round(pp_cemex@teststat[1], 4),
+    round(pp_walmex@teststat[1], 4)
+  ),
+  PP_Critical = c(
+    round(pp_ipc@cval[1, "5pct"], 4),
+    round(pp_cemex@cval[1, "5pct"], 4),
+    round(pp_walmex@cval[1, "5pct"], 4)
+  )
+)
+
+# 5. Mostrar tabla
+resultados_estacionaridad %>%
+  knitr::kable(
+    caption = "Resultados de Pruebas de Estacionaridad (DF, ADF y Phillips-Perron)"
+  )
+
+
+              
+```
+
+Derivado de que los rendimientos fueron calculados mediante diferencias logarítmicas, las tres pruebas de estacionaridad (Dickey-Fuller Simple, Dickey-Fuller Aumentada y Phillips-Perron) indican que las series de tiempo del IPC, CEMEX y WALMEX son estacionarias. Esto se concluye al observar que los estadísticos de prueba son menores que los valores críticos al nivel del 5% para todas las variables analizadas.
+
+## Modelos de Rezagos Distribuidos Finitos (FDL)
+
+Un modelo de rezagos distribuidos finitos (FDL) es un tipo de modelo econométrico que se utiliza para capturar el efecto de una variable independiente en una variable dependiente a lo largo del tiempo, considerando un número finito de periodos de rezago. En otras palabras, este modelo permite que los cambios en la variable independiente afecten a la variable dependiente no solo en el periodo actual, sino también en varios periodos futuros.
+
+La estructura general de un modelo FDL se puede expresar de la siguiente manera:
+
+$$y_t = \alpha + \beta_0 x_t + \beta_1 x_{t-1} + \beta_2 x_{t-2} + ... + \beta_k x_{t-k} + \epsilon_t$$ {#eq-12}
+
+Donde:
+
+-   $y_t$ es la variable dependiente en el tiempo $t$.
+-   $x_t$ es la variable independiente en el tiempo $t$.
+-   $\beta_0, \beta_1, ..., \beta_k$ son los coeficientes que miden el impacto de la variable independiente en diferentes periodos de rezago.
+-   $\epsilon_t$ es el término de error en el tiempo $t$.
+
+En finanzas, los efectos toman tiempo. Si CEMEX tiene un retorno positivo hoy, es posible que el IPC reaccione hoy, pero también mañana y pasado mañana mientras el mercado asimila la información.
+
+El Modelo de Rezagos Distribuidos Finitos de orden $q$ (FDL-q) se define matemáticamente como:
+
+$$IPC_t = \alpha + \beta_0 CEMEX_t + \beta_1 CEMEX_{t-1} + \dots + \beta_q CEMEX_{t-q} + e_t$$ {#eq-13}
+
+Interpretación económica de los coeficientes:
+
+-   $\beta_0$ (Multiplicador de Impacto): El cambio inmediato en el IPC ante un cambio en CEMEX hoy.
+-   $\beta_1, \beta_2, \dots, \beta_q$ (Efectos Rezagados): El impacto adicional en el IPC en los periodos siguientes debido a un cambio en CEMEX hoy.
+
+Para ejemplificar los conceptos anteriores, asumimos que el IPC reacciona al comportamiento que tuvieron CEMEX y WALMEX tanto ayer $(t-1)$ como antier $(t-2)$, por lo cual el modelo FDL-2 se expresa de la siguiente manera:
+
+$$IPC_t = \alpha + \beta_0 CEMEX_t + \beta_1 CEMEX_{t-1} + \beta_2 CEMEX_{t-2} + \gamma_0 WALMEX_t + \gamma_1 WALMEX_{t-1} + \gamma_2 WALMEX_{t-2} + e_t$$ {#eq-14}
+
+A continuación, se presenta el modelo FDL-2 y sus resultados:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# 8. MODELO FDL-2
+model_fdl2 <- dynlm(IPC ~ L(CEMEX, 0:2
+) + L(WALMEX, 0:2), data = data_ts)
+
+# Tabla de resultados OLS estándar para FDL-2
+tidy(model_fdl2) %>%
+  mutate(across(where(is.numeric), ~ round(., 4))) %>%
+  knitr::kable(caption = "Modelo FDL-2 OLS Estándar")
+
+# Diagnóstico BG Test para FDL-2
+bg_test_fdl2 <- bgtest(model_fdl2, order = 5)
+
+# Mostrar resultado
+data.frame(
+  "Estadístico LM" = round(bg_test_fdl2$statistic,
+4),
+  "Valor p" = round(bg_test_fdl2$p.value, 4),
+  "Conclusión" = ifelse(bg_test_fdl2$p.value < 0.05, "Hay Autocorrelación", "No hay Autocorrelación")
+) %>%
+  knitr::kable(caption = "Prueba de Breusch-Godfrey para
+ Modelo FDL-2")
+
+
+```
+
+Toda vez que se presentó autocorrelación en el modelo FDL-2, se aplicó la corrección de errores robustos Newey-West, cuyos resultados se presentan a continuación:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Solución: Errores Estándar Robustos (HAC) para FDL-2
+vcov_hac_fdl2 <- vcovHAC(model_fdl2)
+model_fdl2_robust <- coeftest(model_fdl2, vcov = vcov_hac_fdl2)
+
+# Convertimos a tidy dataframe manualmente para kable
+results_fdl2_robust <- data.frame(
+  Estimacion = round(model_fdl2_robust[,1], 4),
+  Error_Std_Robusto = round(model_fdl2_robust[,2],
+ 4),
+  t_value = round(model_fdl2_robust[,3], 4),
+  p_value = round(model_fdl2_robust[,4], 4)
+)
+
+results_fdl2_robust %>%
+  knitr::kable(caption = "Resultados Finales del Modelo FDL-2 con Errores Robustos (Newey-West)")
+
+# Mostrar resultados de R cuadrada para FDL-2
+r_squared_fdl2 <- summary(model_fdl2)$r.squared
+data.frame(
+  "R-cuadrada" = round(r_squared_fdl2, 4)
+) %>%
+  knitr::kable(caption = "R-cuadrada del Modelo FDL-
+2 con Errores Robustos")
+```
+
+Con base en los resultados, se observa que CEMEX y WALMEX en el tiempo $t$ son significativos para predecir el IPC con un 0.2059 de influencia de CEMEX y 0.2685 de WALMEX. Mientras que los rezagos de ambas acciones no son significativos. El $R^2$ del modelo FDL-2 es de 0.5024, estableciendo el valor de ajuste de la variable explicada del modelo.
+
+Adicionalmente calculamos los Multiplicadores de Largo Plazo (MLP) para cada variable independiente en el modelo FDL-2, los cuales se obtienen sumando los coeficientes de los rezagos correspondientes.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Cálculo de Multiplicadores de Largo Plazo (MLP)
+mlp_cemex <- sum(coef(model_fdl2)[grep("CEMEX", names(coef(model_fdl2)))])
+mlp_walmex <- sum(coef(model_fdl2)[grep("WALMEX", names(coef(model_fdl2)))])
+
+# Generar la tabla de resultados
+resultados_mlp <- data.frame(
+  Variable = c("CEMEX", "WALMEX"),
+  MLP = round(c(mlp_cemex, mlp_walmex), 4)
+)
+
+# Mostrar tabla
+knitr::kable(resultados_mlp, caption = "Multiplicadores de Largo Plazo (MLP)")
+
+```
+
+Los Multiplicadores de Largo Plazo (MLP) calculados para el modelo FDL-2 son 0.2113 para CEMEX y 0.2763 para WALMEX. Estos valores indican el efecto total acumulado en el IPC debido a un cambio unitario en cada una de las acciones, considerando todos los rezagos incluidos en el modelo.
+
+A efecto de validar la significancia de los MLP, se realiza el test de Wald para validar que la suma acumulada de los rezagos de cada variable explicativa sean significativos.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# 1. Definir la matriz de varianza robusta (HAC) 
+vcov_hac_fdl2 <- NeweyWest(model_fdl2)
+
+# 2. Definir las hipótesis
+hipotesis_cemex <- "L(CEMEX, 0:2)0 + L(CEMEX, 0:2)1 + L(CEMEX, 0:2)2 = 0"
+hipotesis_walmex <- "L(WALMEX, 0:2)0 + L(WALMEX, 0:2)1 + L(WALMEX, 0:2)2 = 0"
+
+# 3. Ejecutar Test de Wald
+wald_cemex <- linearHypothesis(model_fdl2, hipotesis_cemex, vcov = vcov_hac_fdl2)
+wald_walmex <- linearHypothesis(model_fdl2, hipotesis_walmex, vcov = vcov_hac_fdl2)
+
+# 4. Crear tabla de resultados
+data.frame(
+  Variable = c("CEMEX", "WALMEX"),
+  "Estadístico Wald (F)" = c(round(wald_cemex$F[2], 4), 
+                             round(wald_walmex$F[2], 4)),
+  "Valor p" = c(round(wald_cemex$`Pr(>F)`[2], 4), 
+                round(wald_walmex$`Pr(>F)`[2], 4)),
+  "Conclusión" = c(ifelse(wald_cemex$`Pr(>F)`[2] < 0.05, "MLP Significativo", "MLP No Significativo"),
+                   ifelse(wald_walmex$`Pr(>F)`[2] < 0.05, "MLP Significativo", "MLP No Significativo"))
+) %>%
+  knitr::kable(caption = "Test de Wald para Multiplicadores de Largo Plazo (MLP)")
+
+
+```
+
+Los valores de p obtenidos en el Test de Wald para ambos MLP son menores a 0.05, lo que indica que los Multiplicadores de Largo Plazo (MLP) para CEMEX y WALMEX son estadísticamente significativos. Esto sugiere que los efectos acumulados de estas acciones en el IPC a lo largo del tiempo son relevantes y no se deben al azar.
+
+## Selección Técnica del Número de Rezagos
+
+La selección del número adecuado de rezagos en un modelo de rezagos distribuidos finitos (FDL) es crucial para capturar correctamente la dinámica temporal entre las variables. Existen varios métodos técnicos para determinar el número óptimo de rezagos, entre los cuales se destacan los criterios de información como el Criterio de Información de Akaike (AIC) y el Criterio de Información Bayesiano (BIC).
+
+Estos criterios evalúan la calidad del modelo penalizando la complejidad del mismo (número de parámetros). El AIC y BIC se calculan de la siguiente manera:
+
+-   AIC: $AIC = -2 \ln(L) + 2k$ {#eq-15}
+
+-   BIC: $BIC = -2 \ln(L) + k \ln(n)$ {#eq-16}
+
+Donde:
+
+-   $L$ es la función de verosimilitud del modelo.
+-   $k$ es el número de parámetros estimados en el modelo.
+-   $n$ es el número de observaciones.
+
+El objetivo es minimizar estos valores; un modelo con un AIC o BIC más bajo se considera mejor en términos de equilibrio entre ajuste y complejidad.
+
+A continuación, se presenta un ejemplo de cómo utilizar AIC y BIC para seleccionar el número óptimo de rezagos en un modelo FDL aplicado a las series de tiempo del IPC, CEMEX y WALMEX:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Selección del Número Óptimo de Rezagos usando AIC y BIC
+max_lags <- 10
+aic_values <- numeric(max_lags)
+bic_values <- numeric(max_lags)
+for (lag in 1:max_lags) {
+  model_temp <- dynlm(IPC ~ L(CEMEX, 0:lag) + L(WALMEX, 0:lag), data = data_ts)
+  aic_values[lag] <- AIC(model_temp)
+  bic_values[lag] <- BIC(model_temp)
+}
+
+# Crear tabla de resultados
+resultados_rezagos <- data.frame(
+  Rezagos = 1:max_lags,
+  AIC = round(aic_values, 4),
+  BIC = round(bic_values, 4)
+)
+
+# Mostrar tabla
+resultados_rezagos %>%
+  knitr::kable(caption = "Selección del Número Óptimo de Rezagos usando AIC y BIC")
+
+
+
+```
+
+Los resultados muestran los valores de AIC y BIC para modelos FDL con diferentes números de rezagos, en este caso se observa que que el modelo con 1 rezago es el que presenta el valor más bajo tanto en AIC como en BIC, lo que sugiere que este es el número óptimo de rezagos para capturar la dinámica entre las variables en este contexto específico.
+
+En tal virtud, se puede concluir que el modelo FDL-1 es el más adecuado para explicar la relación entre el IPC, CEMEX y WALMEX en este análisis particular.
+
+La ecuación es la siguiente:
+
+$$IPC_t = \alpha + \beta_0 CEMEX_t + \beta_1 CEMEX_{t-1} + \gamma_0 WALMEX_t + \gamma_1 WALMEX_{t-1} + e_t$$ {#eq-17}
+
+A continuación, se presentan los resultados del modelo FDL-1 con corrección de errores robustos Newey-West:
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Modelo Errores Estándar Robustos (HAC) para FDL-1
+model_fdl1 <- dynlm(IPC ~ L(CEMEX, 0:1) + L(WALMEX, 0:1), data = data_ts)
+vcov_hac_fdl1 <- vcovHAC(model_fdl1)
+model_fdl1_robust <- coeftest(model_fdl1, vcov = vcov_hac_fdl1)
+
+# Convertimos a tidy dataframe manualmente para kable
+results_fdl1_robust <- data.frame(
+  Estimacion = round(model_fdl1_robust[,1], 4),
+  Error_Std_Robusto = round(model_fdl1_robust[,2],
+ 4),
+  t_value = round(model_fdl1_robust[,3], 4),
+  p_value = round(model_fdl1_robust[,4], 4)
+)
+results_fdl1_robust %>%
+  knitr::kable(caption = "Resultados Finales del Modelo FDL-1
+ con Errores Robustos (Newey-West)")
+
+# Mostrar resultados de R cuadrada para FDL-1
+r_squared_fdl1 <- summary(model_fdl1)$r.squared
+data.frame(
+  "R-cuadrada" = round(r_squared_fdl1, 4)
+) %>%
+  
+  knitr::kable(caption = "R-cuadrada del Modelo FDL-
+1 con Errores Robustos")
+
+
+```
+
+Conclusión: Las variables de CEMEX y WALMEX en el tiempo $t$ son significativas para predecir el IPC, con coeficientes de 0.2061 y 0.2679 respectivamente. Los rezagos de ambas acciones no son significativos. El $R^2$ del modelo FDL-1 es de 0.5027, indicando un buen ajuste del modelo.
+
+## Modelos Autoregresivos (AR)
+
+Un modelo autoregresivo (AR) es un tipo de modelo estadístico utilizado para analizar y predecir series de tiempo. En un modelo AR, la variable dependiente se explica en función de sus propios valores pasados (rezagos). La idea principal es que los valores anteriores de la serie contienen información útil para predecir los valores futuros.
+
+La estructura general de un modelo AR de orden $p$ (AR(p)) se puede expresar de la siguiente manera:
+
+$$y_t = \alpha + \phi_1 y_{t-1} + \phi_2 y_{t-2} + ... + \phi_p y_{t-p} + \epsilon_t$$ {#eq-18}
+
+Donde:
+
+-   $y_t$ es la variable dependiente en el tiempo $t$.
+-   $\alpha$ es una constante.
+-   $\phi_1, \phi_2, ..., \phi_p$ son los coeficientes que miden el impacto de los valores pasados de la variable dependiente.
+-   $\epsilon_t$ es el término de error en el tiempo $t$.
+
+Para este tipo de modelos se deben cuidar tres aspectos: que sea estacionario, que sea parsimónico y que no haya autocorrelación residual. De igual forma para elegir la cantidad de rezagos se deben utilizar los criterios de información AIC y BIC.
+
+Se ejemplificará lo anterior con la serie de tiempo del IPC. Y toda vez que corresponde a las diferencias obtenidas mediante logarítmos, como anteriormente se comprobó tiene un comportamiento estacionario.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Selección del Mejor Modelo AR por Criterios de Información
+max_lags_ar <- 10
+aic_values_ar <- numeric(max_lags_ar)
+bic_values_ar <- numeric(max_lags_ar)
+for (lag in 1:max_lags_ar) {
+  model_temp_ar <- dynlm(IPC ~ L(IPC, 1:lag),
+ data = data_ts)
+  aic_values_ar[lag] <- AIC(model_temp_ar)
+  bic_values_ar[lag] <- BIC(model_temp_ar)
+}
+
+# Crear tabla de resultados
+resultados_rezagos_ar <- data.frame(
+  Rezagos = 1:max_lags_ar,
+  AIC = round(aic_values_ar, 4),
+  BIC = round(bic_values_ar, 4)
+)
+
+# Mostrar tabla
+resultados_rezagos_ar %>%
+  knitr::kable(caption = "Selección del Número Óptimo de Rezagos para Modelo AR usando AIC y BIC")
+
+# Elegir e indicar el modelo AR con el mejor número de rezagos (según AIC)
+best_lag_ar_aic <- which.min(aic_values_ar)
+model_ar <- dynlm(IPC ~ L(IPC, 1:best_lag_ar_aic
+), data = data_ts)
+
+cat("El mejor modelo AR según AIC tiene", best_lag_ar_aic, "rezagos.\n")
+
+# Elegir e indicar el modelo AR con el mejor número de rezagos (según BIC)
+best_lag_ar_bic <- which.min(bic_values_ar)
+model_ar <- dynlm(IPC ~ L(IPC, 1:best_lag_ar_bic
+), data = data_ts)
+
+cat("El mejor modelo AR según BIC tiene", best_lag_ar_bic, "rezagos.\n")
+
+
+
+```
+
+Ahora se genra el modelo con un rezago mediante la ecuación:
+
+$$IPC_t = \alpha + \phi_1 IPC_{t-1} + e_t$$ {#eq-19}
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Modelo AR-1
+model_ar1 <- dynlm(IPC ~ L(IPC, 1), data = data_ts)
+
+# Tabla de resultados OLS estándar para AR-1
+tidy(model_ar1) %>%
+  mutate(across(where(is.numeric), ~ round(., 4))) %>%
+  knitr::kable(caption = "Modelo AR-1 OLS Estándar
+  ")
+
+# Diagnóstico BG Test para AR-1
+bg_test_ar1 <- bgtest(model_ar1, order = 5)
+
+# Mostrar resultado
+data.frame(
+  "Estadístico LM" = round(bg_test_ar1$statistic,
+                           4),
+  "Valor p" = round(bg_test_ar1$p.value, 4),
+  "Conclusión" = ifelse(bg_test_ar1$p.value < 0.05
+                        , "Hay Autocorrelación", "No hay Autocorrelación")
+  ) %>%
+  
+  knitr::kable(caption = "Prueba de Breusch-Godfrey para
+  Modelo AR-1")
+
+
+```
+
+La conclusión a la que se llega es que no hay presencia de autocorrelación; no obstante, los resultados del modelo AR(1) muestra que $\alpha$ y $\phi$ son no significativos. Por lo tanto el modelo autoregresivo no es explicativo del comportamiento del IPC.
+
+## Modelo Autoregresivo con Rezagos Distribuidos (ARDL)
+
+Un modelo autoregresivo con rezagos distribuidos (ARDL) es un tipo de modelo econométrico que combina características de los modelos autoregresivos (AR) y los modelos finitos de rezagos distribuidos (FDL). Este modelo es particularmente útil para analizar la relación dinámica entre una variable dependiente y una o más variables independientes, permitiendo tanto la influencia de los valores pasados de la variable dependiente como los efectos rezagados de las variables independientes.
+
+La estructura general de un modelo ARDL se puede expresar de la siguiente manera:
+
+$$y_t = \alpha + \sum_{i=1}^{p} \phi_i y_{t-i} + \sum_{j=0}^{q} \beta_j x_{t-j} + \epsilon_t$$ {#eq-20}
+
+Donde: - $y_t$ es la variable dependiente en el tiempo $t$. - $\alpha$ es una constante. - $\phi_i$ son los coeficientes que miden el impacto de los valores pasados de la variable dependiente. - $\beta_j$ son los coeficientes que miden el impacto de los valores rezagados de la variable independiente. - $\epsilon_t$ es el término de error en el tiempo $t$. - $p$ es el número de rezagos de la variable dependiente. - $q$ es el número de rezagos de la variable independiente.
+
+Para ejemplificar el modelo ARDL, se asume que el IPC depende de sus propios valores pasados (rezagos) y de los valores actuales y pasados de las acciones de CEMEX y WALMEX. Se selecciona con base en los datos de los casos anteriores, un modelo ARDL(1,1,1), que incluye un rezago del IPC y un rezago de cada una de las acciones.
+
+$$IPC_t = \alpha + \phi_1 IPC_{t-1} + \beta_0 CEMEX_t + \beta_1 CEMEX_{t-1} + \gamma_0 WALMEX_t + \gamma_1 WALMEX_{t-1} + e_t$$ {#eq-21}
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Modelo ARDL(1,1,1)
+model_ardl <- dynlm(IPC ~ L(IPC, 1) + L(CEMEX, 0:1) + L(WALMEX, 0:1), data=data_ts)
+
+# Tabla de resultados OLS estándar para ARDL(1,1,1)
+tidy(model_ardl) %>%
+  mutate(across(where(is.numeric), ~ round(., 4))) %>%
+  knitr::kable(caption = "Modelo ARDL(1,1,1
+  ) OLS Estándar")
+
+# Diagnóstico BG Test para ARDL(1,1,1)
+bg_test_ardl <- bgtest(model_ardl, order = 5)
+
+# Mostrar resultado
+data.frame(
+  "Estadístico LM" = round(bg_test_ardl$statistic,
+                           4),
+  "Valor p" = round(bg_test_ardl$p.value, 4),
+  "Conclusión" = ifelse(bg_test_ardl$p.value < 0.05, "Hay Autocorrelación", "No hay Autocorrelación")
+  ) %>%
+  
+  knitr::kable(caption = "Prueba de Breusch-Godfrey para
+  Modelo ARDL(1,1,1)")
+
+# Se obtiene R cuadrada del modelo ARDL(1,1,1)
+r_squared_ardl <- summary(model_ardl)$r.squared
+data.frame(
+  "R-cuadrada" = round(r_squared_ardl, 4)
+  ) %>%
+  
+  knitr::kable(caption = "R-cuadrada del Modelo ARDL(1,1,1)")
+
+```
+
+Los resultados del modelo ARDL(1,1,1) indican que el rezago del IPC es significativo con un coeficiente de -0.1008, mientras que CEMEX y WALMEX en el tiempo $t$ son significativos con coeficientes de 0.2059 y 0.2689 respectivamente. De igual forma os rezagos de ambas acciones son significativos con 0.0351 y 0.0405 respectivamente. El $R^2$ del modelo ARDL(1,1,1) es de 0.5093, indicando un buen ajuste del modelo.
+
+Adicionalmente calculamos los Multiplicadores de Largo Plazo (MLP) para cada variable independiente en el modelo ARDL(1,1,1), los cuales se obtienen sumando los coeficientes de los rezagos correspondientes y dividiendo por (1 - coeficiente del rezago de la variable dependiente). Asimismo, con la finalidad de validar la significancia de los MLP, se realiza el test de Wald para validar que la suma acumulada de los rezagos de cada variable explicativa sean significativos.
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+# Definir coeficientes y matriz de varianza robusta (HAC)
+coef_ardl <- coef(model_ardl)
+vcov_hac_ardl <- NeweyWest(model_ardl)
+
+# Identificar los índices de las variables automáticamente
+idx_cemex  <- grep("CEMEX", names(coef_ardl))
+idx_walmex <- grep("WALMEX", names(coef_ardl))
+idx_ipc    <- grep("IPC", names(coef_ardl)) 
+
+# Cálculo de Multiplicadores de Largo Plazo (MLP) puntual
+# MLP = Suma(Coeficientes X) / (1 - Suma(Coeficientes Y_rezagada))
+mlp_cemex_ardl  <- sum(coef_ardl[idx_cemex])  / (1 - sum(coef_ardl[idx_ipc]))
+mlp_walmex_ardl <- sum(coef_ardl[idx_walmex]) / (1 - sum(coef_ardl[idx_ipc]))
+
+# Generar la tabla de resultados de MLP
+resultados_mlp_ardl <- data.frame(
+  Variable = c("CEMEX", "WALMEX"),
+  MLP = round(c(mlp_cemex_ardl, mlp_walmex_ardl), 4)
+)
+
+knitr::kable(resultados_mlp_ardl, caption = "Multiplicadores de Largo Plazo (MLP) para Modelo ARDL(1,1,1)")
+
+# Validación: Test de Wald con Matriz Dinámica
+
+# --- Matriz para CEMEX ---
+H_cemex <- matrix(0, nrow = 1, ncol = length(coef_ardl))
+colnames(H_cemex) <- names(coef_ardl)
+# Asignamos 1 a TODAS las columnas encontradas para CEMEX
+H_cemex[1, idx_cemex] <- 1
+
+# --- Matriz para WALMEX ---
+H_walmex <- matrix(0, nrow = 1, ncol = length(coef_ardl))
+colnames(H_walmex) <- names(coef_ardl)
+# Asignamos 1 a TODAS las columnas encontradas para WALMEX
+H_walmex[1, idx_walmex] <- 1
+
+# Ejecutar el test usando las matrices H
+wald_cemex_ardl <- linearHypothesis(model_ardl, H_cemex, vcov = vcov_hac_ardl)
+wald_walmex_ardl <- linearHypothesis(model_ardl, H_walmex, vcov = vcov_hac_ardl)
+
+# 4. Crear tabla de resultados del Test de Wald
+data.frame(
+  Variable = c("CEMEX", "WALMEX"),
+  "Estadístico Wald (F)" = c(round(wald_cemex_ardl$F[2], 4), 
+                             round(wald_walmex_ardl$F[2], 4)),
+  "Valor p" = c(round(wald_cemex_ardl$`Pr(>F)`[2], 4),
+                round(wald_walmex_ardl$`Pr(>F)`[2], 4)),
+  "Conclusión" = c(
+    ifelse(wald_cemex_ardl$`Pr(>F)`[2] < 0.05, "MLP Significativo", "MLP No Significativo"),
+    ifelse(wald_walmex_ardl$`Pr(>F)`[2] < 0.05, "MLP Significativo", "MLP No Significativo")
+  )
+) %>%
+  knitr::kable(caption = "Test de Wald para Multiplicadores de Largo Plazo (MLP) del Modelo ARDL(1,1,1)")
+
+```
+
+Los Multiplicadores de Largo Plazo (MLP) calculados para el modelo ADRL (1,1,1) son 0.2190 para CEMEX y 0.2811 para WALMEX. Estos valores indican el efecto total acumulado en el IPC debido a un cambio unitario en cada una de las acciones, considerando todos los rezagos incluidos en el modelo.
+
+Los valores de p obtenidos en el Test de Wald para ambos MLP son menores a 0.05, lo que indica que los Multiplicadores de Largo Plazo (MLP) para CEMEX y WALMEX son estadísticamente significativos. Esto sugiere que los efectos acumulados de estas acciones en el IPC a lo largo del tiempo son relevantes y no se deben al azar.

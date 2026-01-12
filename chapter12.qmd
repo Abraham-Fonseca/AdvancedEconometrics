@@ -1,0 +1,195 @@
+# Capítulo 12. Regresión con Datos de Series de Tiempo: Variables No Estacionarias
+
+## Introducción
+Un gran parte de las series de tiempo en el mundo real son no estacionarias, lo que significa que sus propiedades estadísticas cambian con el tiempo. En este capítulo, exploraremos cómo manejar variables no estacionarias en modelos de regresión, utilizando técnicas como la diferenciación y la transformación de variables.
+
+Recordando que una variables es estacionaria si cumple las siguientes tres condiciones:
+
+1. La media es constante a lo largo del tiempo.
+2. La varianza es constante a lo largo del tiempo.
+3. La covarianza es constante ya que depende solo del rezago, no del tiempo.
+
+Se utilizarán igual que en el capítulo anterior los datos de las series de CEMEX, WALMEX y el IPC de México. 
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Cargar librerías necesarias
+packages <- c("quantmod", "tidyverse", "dynlm", "lmtest", "sandwich", "zoo", "plotly", "broom", "car", "urca","knitr","dplyr","purrr","tseries","dygraphs","stargazer","aTSA","kableExtra")
+
+for (pkg in packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
+  library(pkg, character.only = TRUE)
+}
+
+# Descarga de Datos (Últimos 5 años)
+start_date <- "2020-01-01"
+
+# Descargar IPC (^MXX), CEMEX (CEMEXCPO.MX), WALMEX (WALMEX.MX)
+getSymbols(c("^MXX", "CEMEXCPO.MX", "WALMEX.MX"), 
+           src = "yahoo", 
+           from = start_date, 
+           periodicity = "daily")
+
+# Consolidación de Datos con base al Precio de Cierre Ajustado 
+datos <- merge(MXX[,6], CEMEXCPO.MX[,6], WALMEX.MX[,6])
+colnames(datos) <- c("IPC", "CEMEX", "WALMEX")
+
+
+# Eliminar filas con NAs
+datos <- na.omit(datos)
+
+# Gráfica 1: IPC (Unidades en Puntos)
+dygraph(datos$IPC, main = "Evolución del IPC (México)", group = "mercado_mx") %>%
+  dyAxis("y", label = "Puntos Base") %>%
+  dyOptions(colors = "darkgreen") %>%  # Color negro para diferenciar el índice
+  dyRangeSelector(height = 20)     # Selector de rango más delgado
+
+# Gráfica 2: Acciones (Unidades Monetarias / Pesos)
+# Seleccionamos solo las columnas de CEMEX y WALMEX
+dygraph(datos[, c("CEMEX", "WALMEX")], main = "Evolución de Acciones: CEMEX y WALMEX", group = "mercado_mx") %>%
+  dyAxis("y", label = "Precio de Cierre (MXN)") %>%
+  dyOptions(colors = c("red", "blue")) %>% # Colores distintivos para cada acción
+  dyRangeSelector(height = 20)
+
+# Mostrar en una tabla los datos de estadística descriptiva del IPC, CEMEX y WALMEX
+stargazer(as.data.frame(datos), 
+          type = "text", 
+          title = "Estadísticos Descriptivos: IPC, CEMEX y WALMEX",
+          digits = 2,          
+          summary.stat = c("n", "mean", "median", "sd", "min", "max"))
+
+```
+
+
+## Pruebas de Raíz Unitaria
+
+Ahora determinemos si las series son estacionarias o no estacionarias mediante dos pruebas: Dickey Fluller Aumentada (ADF) y la Prueba de Raíz Unitaria de Phillips-Perron (PP).
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Prueba de Dickey-Fuller Aumentada (ADF)
+adf_ipc <- ur.df(datos$IPC, type = "trend", selectlags = "AIC")
+adf_cemex <- ur.df(datos$CEMEX, type = "trend", selectlags = "AIC")
+adf_walmex <- ur.df(datos$WALMEX, type = "trend", selectlags = "AIC")
+
+# Prueba de Phillips-Perron (PP)
+pp_ipc <- ur.pp(datos$IPC, type = "Z-tau", model =
+ "trend", lags = "short")
+pp_cemex <- ur.pp(datos$CEMEX, type = "Z-tau", model = "trend", lags = "short")
+pp_walmex <- ur.pp(datos$WALMEX, type = "Z-tau", model = "trend", lags = "short")
+
+# Función para extraer resultados de las pruebas
+extract_results <- function(adf, pp, var_name) {
+  adf_stat <- adf@teststat[1]
+  adf_crit <- adf@cval[1, ]
+  pp_stat <- pp@teststat[1]
+  pp_crit <- pp@cval[1, ]
+  data.frame(
+    Variable = var_name,
+    ADF_Statistic = adf_stat,
+    ADF_Critical_1pct = adf_crit[1],
+    ADF_Critical_5pct = adf_crit[2],
+    ADF_Critical_10pct = adf_crit[3],
+    PP_Statistic = pp_stat,
+    PP_Critical_1pct = pp_crit[1],
+    PP_Critical_5pct = pp_crit[2],
+    PP_Critical_10pct = pp_crit[3]
+  )
+}
+# Extraer resultados para cada variable
+results_ipc <- extract_results(adf_ipc, pp_ipc, "IPC")
+results_cemex <- extract_results(adf_cemex, pp_cemex, "CEMEX")
+results_walmex <- extract_results(adf_walmex, pp_walmex, "WALMEX")
+
+# Combinar todos los resultados en un solo data frame
+results <- rbind(results_ipc, results_cemex, results_walmex)
+
+# Mostrar resultados en una tabla
+kable(results, caption = "Resultados de Pruebas de Raíz Unitaria (Augmented Dickey Fuller y Phillips-Perron)")
+
+
+```
+
+Los resultados de las pruebas ADF y PP indican que todas las series (IPC, CEMEX y WALMEX) son no estacionarias en niveles, ya que no podemos rechazar la hipótesis nula de raíz unitaria, puesto que los valores estadísticos son mayores que los valores críticos al 5%.
+
+Lo que nos muestra es que en niveles las series son no estacionarias, mientras que en primeras diferencias con logaritmos como vimos en el capítulo anterior, las series resultan ser estacionarias.
+
+## Cointegración
+
+Dado que las series son no estacionarias en niveles, es importante verificar si existe una relación de cointegración entre ellas. La cointegración implica que aunque las series individuales sean no estacionarias, una combinación lineal de ellas puede ser estacionaria.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+# Preparación de Datos
+datos_cointegracion <- na.omit(datos)
+
+# Prueba de Johansen
+johansen_test <- ca.jo(datos_cointegracion, type = "trace", ecdet = "const", K = 2)
+
+estadisticos_jo <- johansen_test@teststat
+criticos_jo <- johansen_test@cval
+
+nombres_hipotesis <- rownames(criticos_jo)
+if(is.null(nombres_hipotesis)) {
+  nombres_hipotesis <- paste("r <=", (length(estadisticos_jo)-1):0)
+}
+
+tabla_johansen <- data.frame(
+  Hipotesis = nombres_hipotesis,
+  Test_Statistic = estadisticos_jo,
+  Critical_5pct = criticos_jo[, "5pct"]
+)
+
+tabla_johansen$Decision <- ifelse(tabla_johansen$Test_Statistic > tabla_johansen$Critical_5pct, 
+                                  "Rechazar H0", "No Rechazar H0")
+tabla_johansen$Interpretacion <- ifelse(tabla_johansen$Decision == "Rechazar H0",
+                                        "Existe Cointegración", 
+                                        "No hay evidencia de cointegración")
+
+kable(tabla_johansen, 
+      caption = "Resultados Johansen (Trace Test)",
+      digits = 2, row.names = FALSE)
+
+
+# Prueba de Engle-Granger AUTOMATIZADA con aTSA
+
+# Convertimos los objetos xts a numéricos/matrices simples para que coint.test los lea.
+y_ipc <- as.numeric(datos_cointegracion$IPC)
+x_acciones <- as.matrix(datos_cointegracion[, c("CEMEX", "WALMEX")])
+
+# Ejecutamos el test
+eg_test_atsa <- coint.test(y_ipc, x_acciones, d = 0, output = FALSE)
+
+# Procesamiento de resultados
+resultados_eg <- as.data.frame(eg_test_atsa[1, , drop=FALSE]) 
+
+tabla_eg_final <- data.frame(
+  Modelo_ADF_Residuos = "Sin Constante ni Tendencia",
+  Lag = resultados_eg$lag,
+  t_Statistic = resultados_eg$EG,
+  P_Value_MacKinnon = resultados_eg$p.value
+)
+
+tabla_eg_final$Decision <- ifelse(tabla_eg_final$P_Value_MacKinnon < 0.05,
+                                  "Rechazar H0", "No Rechazar H0")
+
+tabla_eg_final$Conclusion <- ifelse(tabla_eg_final$Decision == "Rechazar H0",
+                                    "Sí existe Cointegración",
+                                    "No existe Cointegración (Espuria)")
+
+kable(tabla_eg_final, 
+      caption = "Resultados Engle-Granger (Valores P exactos de MacKinnon via aTSA)",
+      digits = 4)
+```
+
+
+Ambas prubeas indican que no existe cointegración entre las series en niveles, lo que sugiere que cualquier relación de largo plazo entre ellas no es estable.
+
+## Modelos de Regresión con Variables No Estacionarias
+
+Dado que las series son no estacionarias y no cointegradas, procederemos a modelar las relaciones utilizando las primeras diferencias de las series logarítmicas, que son estacionarias.
+
+
+
+

@@ -1,0 +1,27 @@
+project:
+  type: book
+
+book:
+  title: "Modelos Avanzados de Econometría"
+  author: "Abraham Fonseca Tinoco"
+  date: "12/31/2025"
+  chapters:
+    - index.qmd
+    - intro.qmd
+    - chapter9.qmd
+    - chapter12.qmd
+    - summary.qmd
+    - references.qmd
+
+bibliography: references.bib
+
+format:
+  html:
+    theme:
+      - cosmo
+      - brand
+  pdf:
+    documentclass: scrreprt
+
+editor: visual
+
