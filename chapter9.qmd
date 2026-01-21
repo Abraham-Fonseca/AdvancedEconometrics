@@ -140,7 +140,7 @@ data.frame(
 
 ```
 
-Con la regresión realizada mediante Mínimos Cuadrados Ordinarios nos arroja la prueba Breusch-Godfrey que hay significancia estadística de autorrelación, por lo cual se aplicó el modelo de regresión con errores robustos Newey-West. Por lo tanto, los resultados muestra que $\alpha$ es cero, CEMEX tiene una $\beta_1$ de .2080 y WALMEX una $\beta_2$ de .2648, ambas significativos. Con una $R^2$ de 0.4997.
+Con la regresión realizada mediante Mínimos Cuadrados Ordinarios nos arroja la prueba Breusch-Godfrey que hay significancia estadística de autorrelación, por lo cual se aplicó el modelo de regresión con errores robustos Newey-West. Por lo tanto, los resultados muestran que $\alpha$ es cero, CEMEX tiene una $\beta_1$ de .2098 y WALMEX una $\beta_2$ de .2664, ambas significativos. Con una $R^2$ de 0.5022.
 
 ## Pruebas de Estacionaridad
 
@@ -270,7 +270,7 @@ $$IPC_t = \alpha + \beta_0 CEMEX_t + \beta_1 CEMEX_{t-1} + \dots + \beta_q CEMEX
 Interpretación económica de los coeficientes:
 
 -   $\beta_0$ (Multiplicador de Impacto): El cambio inmediato en el IPC ante un cambio en CEMEX hoy.
--   $\beta_1, \beta_2, \dots, \beta_q$ (Efectos Rezagados): El impacto adicional en el IPC en los periodos siguientes debido a un cambio en CEMEX hoy.
+-   $\beta_1, \beta_2, \dots, \beta_q$ (Efectos Rezagados): El impacto adicional en el IPC en función de los cambios en los periodos anteriores en CEMEX.
 
 Para ejemplificar los conceptos anteriores, asumimos que el IPC reacciona al comportamiento que tuvieron CEMEX y WALMEX tanto ayer $(t-1)$ como antier $(t-2)$, por lo cual el modelo FDL-2 se expresa de la siguiente manera:
 
